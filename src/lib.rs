@@ -5,12 +5,20 @@ use wasm_bindgen::prelude::*;
 
 // use the js_sys create the access the JS Math functions
 extern crate js_sys;
+extern crate web_sys;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+
+// A macro to provide `println!(..)`-style syntax for `console.log` logging.
+macro_rules! log {
+    ( $( $t:tt )* ) => {
+        web_sys::console::log_1(&format!( $( $t )* ).into());
+    }
+}
 
 // This is where JS functions are imported from extern "C"
 // The wasm_bindgen macro is used to signify what we want to import from JS or export to JS
@@ -32,6 +40,15 @@ pub enum Cell {
     Alive = 1,
 }
 
+impl Cell {
+    fn toggle(&mut self) {
+        *self = match *self {
+            Cell::Dead => Cell::Alive,
+            Cell::Alive => Cell::Dead,
+        };
+    }
+}
+
 // We create a struct which defines the universe consisting of the width and height as u32 types
 // and cells which is a vector of cells of lenght width * height
 #[wasm_bindgen]
@@ -41,6 +58,7 @@ pub struct Universe {
     cells: Vec<Cell>,
 }
 
+// Implement functions for the Universe struct
 impl Universe {
     // Translate the row and column into an index so that we can access any given cell
     fn get_index(&self, row: u32, column: u32) -> usize {
@@ -65,9 +83,23 @@ impl Universe {
         }
         count
     }
+
+    /// Get the dead and alive values of the entire universe.
+    pub fn get_cells(&self) -> &[Cell] {
+        &self.cells
+    }
+
+    /// Set cells to be alive in a universe by passing the row and column
+    /// of each cell as an array.
+    pub fn set_cells(&mut self, cells: &[(u32, u32)]) {
+        for (row, col) in cells.iter().cloned() {
+            let idx = self.get_index(row, col);
+            self.cells[idx] = Cell::Alive;
+        }
+    }
 }
 
-// Implement tje game rules as a match statement and make it availble to JS via the wasm_bindgen macro
+// Implement the game rules as a match statement and make it availble to JS via the wasm_bindgen macro within the Universe struct
 #[wasm_bindgen]
 impl Universe {
     // Check the game rules for every tick of the game
@@ -82,6 +114,7 @@ impl Universe {
                 let cell = self.cells[idx];
                 // Get the live neightbor count for the cell
                 let live_neighbors = self.live_neighbor_count(row, col);
+
                 // Check if the cell should be dead or alive
                 let next_cell = match (cell, live_neighbors) {
                     // Rule 1: Any live cell with fewer than two live neighbours
@@ -99,6 +132,7 @@ impl Universe {
                     // All other cells remain in the same state.
                     (otherwise, _) => otherwise,
                 };
+
                 next[idx] = next_cell;
             }
         }
@@ -106,13 +140,16 @@ impl Universe {
     }
 
     // Constructor method in order to initialize the universe
-    pub fn new() -> Universe {
+    pub fn new(width: u32, height: u32) -> Universe {
+        // Log to the browser console that a new universe has been created
+        log!("New universe created");
+        utils::set_panic_hook();
         // Create a 64x64 grid universe
-        let width = 128;
-        let height = 128;
+        // let width = 64;
+        // let height = 64;
         // Loop over all cells and assign them either a dead or alive state
         let cells = (0..width * height)
-            .map(|i| {
+            .map(|_i| {
                 // Use the js_sys crate in order to randomly assign dead or alive to a cell
                 if js_sys::Math::random() < 0.5 {
                     Cell::Alive
@@ -144,9 +181,42 @@ impl Universe {
         self.cells.as_ptr()
     }
 
+    /// Set the width of the universe.
+    /// Resets all cells to the dead state.
+    pub fn set_width(&mut self, width: u32) {
+        self.width = width;
+        self.cells = (0..width * self.height).map(|_i| Cell::Dead).collect();
+    }
+
+    /// Set the height of the universe.
+    /// Resets all cells to the dead state.
+    pub fn set_height(&mut self, height: u32) {
+        self.height = height;
+        self.cells = (0..self.width * height).map(|_i| Cell::Dead).collect();
+    }
+
     // Render function which JS can use to render the universe
     pub fn render(&self) -> String {
         self.to_string()
+    }
+
+    // Toggle the state of a cell from dead to alive and vice versa
+    pub fn toggle_cell(&mut self, row: u32, column: u32) {
+        let idx = self.get_index(row, column);
+        self.cells[idx].toggle();
+    }
+
+    pub fn reset(&mut self) {
+        self.cells = (0..self.width * self.height)
+            .map(|_i| {
+                // Use the js_sys crate in order to randomly assign dead or alive to a cell
+                if js_sys::Math::random() < 0.5 {
+                    Cell::Alive
+                } else {
+                    Cell::Dead
+                }
+            })
+            .collect();
     }
 }
 
